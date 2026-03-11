@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { PomodoroView } from "./components/pomodoro/PomodoroView"
 import { usePomodoro } from "./hooks/usePomodoro"
 import { FocusMode } from "./components/pomodoro/FocusMode"
+import { isElectron } from "./utils/isElectron"
 
 export default function App() {
 
@@ -17,13 +18,10 @@ export default function App() {
   const [focusMode, setFocusMode] = useState(false)
 
   useEffect(() => {
-
     const timer = setTimeout(() => {
       setLoading(false)
     }, 800)
-
     return () => clearTimeout(timer)
-
   }, [])
 
   if (loading) {
@@ -58,7 +56,7 @@ export default function App() {
   return (
     <div className="window-surface flex flex-col h-screen">
 
-      <TitleBar toggleSidebar={toggle} />
+      {isElectron() && <TitleBar toggleSidebar={toggle} />}
 
       <div className="flex flex-1">
 

@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react"
 import { motion } from "framer-motion"
 import { ProgressRing } from "./ProgressRing"
 import { formatTime } from "@/utils/formatTime"
+import { isElectron } from "@/utils/isElectron"
+
 
 type Props = {
   time: number
@@ -32,15 +34,21 @@ export function FocusMode({
 
   useEffect(() => {
 
-    window.windowControls.enterFocusMode()
+    if (isElectron()) {
+      window.windowControls.enterFocusMode()
+    } else {
+      document.documentElement.requestFullscreen?.().catch(() => { })
+    }
 
     ambient.current.loop = true
     ambient.current.volume = 0.15
-    ambient.current.play()
+    ambient.current.play().catch(() => { })
 
     const handleKey = (e: KeyboardEvent) => {
 
-      if (e.key === "Escape") exitFocus()
+      if (e.key === "Escape") {
+        exitFocus()
+      }
 
       if (e.ctrlKey || e.altKey || e.metaKey) {
         e.preventDefault()
@@ -51,9 +59,19 @@ export function FocusMode({
     window.addEventListener("keydown", handleKey)
 
     return () => {
+
       ambient.current.pause()
-      window.windowControls.exitFocusMode()
+
+      if (isElectron()) {
+        window.windowControls.exitFocusMode()
+      } else {
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => { })
+        }
+      }
+
       window.removeEventListener("keydown", handleKey)
+
     }
 
   }, [])
@@ -63,13 +81,13 @@ export function FocusMode({
     if (time <= 30 && !warningPlayed.current) {
       warningPlayed.current = true
       warningSound.current.volume = 0.25
-      warningSound.current.play()
+      warningSound.current.play().catch(() => { })
     }
 
     if (time === 0 && !finishPlayed.current) {
       finishPlayed.current = true
       finishSound.current.volume = 0.4
-      finishSound.current.play()
+      finishSound.current.play().catch(() => { })
     }
 
   }, [time])
