@@ -8,7 +8,6 @@ const __dirname = path.dirname(__filename)
 let mainWindow = null
 
 function createWindow() {
-
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -26,7 +25,11 @@ function createWindow() {
     }
   })
 
-  mainWindow.loadURL("http://localhost:5173")
+  if (app.isPackaged) {
+    mainWindow.loadFile(path.join(__dirname, "../../dist/index.html"))
+  } else {
+    mainWindow.loadURL("http://localhost:5173")
+  }
 
   mainWindow.once("ready-to-show", () => {
     mainWindow.show()
@@ -39,45 +42,47 @@ function createWindow() {
   mainWindow.on("unmaximize", () => {
     mainWindow.webContents.send("window-maximized", false)
   })
+
+  mainWindow.on("closed", () => {
+    mainWindow = null
+  })
 }
 
 app.whenReady().then(() => {
 
   ipcMain.on("minimize", () => {
-    const win = BrowserWindow.getFocusedWindow()
-    win?.minimize()
+    mainWindow?.minimize()
   })
 
   ipcMain.on("maximize", () => {
-    const win = BrowserWindow.getFocusedWindow()
-    if (!win) return
-
-    if (win.isMaximized()) {
-      win.unmaximize()
+    if (!mainWindow) return
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize()
     } else {
-      win.maximize()
+      mainWindow.maximize()
     }
   })
 
   ipcMain.on("close", () => {
-    const win = BrowserWindow.getFocusedWindow()
-    win?.close()
+    mainWindow?.close()
   })
 
   ipcMain.on("enter-focus-mode", () => {
-    const win = BrowserWindow.getFocusedWindow()
-    if (!win) return
-
-    win.setFullScreen(true)
-    win.setAlwaysOnTop(true, "screen-saver")
+    if (!mainWindow) return
+    mainWindow.setFullScreen(true)
+    mainWindow.setAlwaysOnTop(true, "screen-saver")
   })
 
   ipcMain.on("exit-focus-mode", () => {
-    const win = BrowserWindow.getFocusedWindow()
-    if (!win) return
+    if (!mainWindow) return
+    mainWindow.setAlwaysOnTop(false)
+    mainWindow.setFullScreen(false)
+  })
 
-    win.setAlwaysOnTop(false)
-    win.setFullScreen(false)
+  ipcMain.handle("get-auto-launch", () => app.getLoginItemSettings().openAtLogin)
+
+  ipcMain.on("set-auto-launch", (_, enabled) => {
+    app.setLoginItemSettings({ openAtLogin: enabled })
   })
 
   createWindow()

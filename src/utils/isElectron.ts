@@ -1,3 +1,3 @@
 export function isElectron() {
-  return !!(window as any)?.windowControls
+  return !!(window as Window & { windowControls?: unknown })?.windowControls
 }

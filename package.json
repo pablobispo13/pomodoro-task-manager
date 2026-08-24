@@ -3,14 +3,37 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
+  "main": "src/electron/main.js",
   "scripts": {
     "dev": "concurrently \"vite\" \"npm:electron\"",
     "electron": "wait-on http://localhost:5173 && electron src/electron/main.js",
     "build": "tsc -b && vite build",
+    "dist:win": "npm run build && electron-builder --win",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview"
+  },
+  "build": {
+    "appId": "com.pablobispo.pomodorotaskmanager",
+    "productName": "Pomodoro Task Manager",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "src/electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
@@ -36,6 +59,7 @@
     "@vitejs/plugin-react": "^5.1.1",
     "concurrently": "^8.2.2",
     "electron": "^30.0.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
