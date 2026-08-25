@@ -12,5 +12,8 @@ declare global {
       getAutoLaunch: () => Promise<boolean>
       setAutoLaunch: (enabled: boolean) => void
     }
+    notifications: {
+      show: (title: string, body: string) => void
+    }
   }
 }

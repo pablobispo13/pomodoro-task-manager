@@ -1,13 +1,51 @@
 import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Check, ChevronDown, ChevronUp, Circle, Pencil, Plus, Target, Trash2, X } from "lucide-react"
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Circle,
+  GripVertical,
+  LayoutGrid,
+  List as ListIcon,
+  Pencil,
+  Plus,
+  Target,
+  Trash2,
+  X
+} from "lucide-react"
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent
+} from "@dnd-kit/core"
+import {
+  SortableContext,
+  arrayMove,
+  horizontalListSortingStrategy,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy
+} from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { formatTime } from "@/utils/formatTime"
-import type { Task, TaskPriority } from "@/hooks/useTasks"
+import type { Task, TaskPriority, TaskStatus } from "@/hooks/useTasks"
+import type { Column } from "@/hooks/useColumns"
+import type { CustomFieldDef, CustomFieldValue } from "@/hooks/useCustomFields"
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
+type ViewMode = "list" | "kanban"
 type Filter = "all" | "active" | "completed"
 
 type Props = {
@@ -17,10 +55,22 @@ type Props = {
   onUpdate: (id: string, data: Partial<Pick<Task, "title" | "description" | "priority" | "estimatedPomodoros">>) => void
   onRemove: (id: string) => void
   onToggle: (id: string) => void
+  onSetStatus: (id: string, status: TaskStatus) => void
+  onReorderColumn: (status: TaskStatus, orderedIds: string[]) => void
   onSetActiveTask: (id: string | null) => void
+  onAddSubtask: (taskId: string, title: string) => void
+  onToggleSubtask: (taskId: string, subtaskId: string) => void
+  onRemoveSubtask: (taskId: string, subtaskId: string) => void
+  columns: Column[]
+  onAddColumn: (label: string) => void
+  onRenameColumn: (id: string, label: string) => void
+  onRemoveColumn: (id: string) => void
+  onReorderColumns: (orderedIds: string[]) => void
+  fields: CustomFieldDef[]
+  onSetCustomField: (taskId: string, fieldId: string, value: CustomFieldValue) => void
 }
 
-// ─── priority helpers ─────────────────────────────────────────────────────────
+// ─── priority / status helpers ─────────────────────────────────────────────────
 
 const priorityOrder: Record<TaskPriority, number> = { high: 0, medium: 1, low: 2 }
 
@@ -34,6 +84,12 @@ const priorityColor: Record<TaskPriority, string> = {
   high: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
   medium: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
   low: "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
+}
+
+function tasksInStatus(tasks: Task[], status: TaskStatus) {
+  return tasks
+    .filter((t) => t.status === status)
+    .sort((a, b) => a.order - b.order || new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
 }
 
 // ─── sub-components ───────────────────────────────────────────────────────────
@@ -136,6 +192,77 @@ function TaskForm({ initial, onSubmit, onCancel, submitLabel }: TaskFormProps) {
   )
 }
 
+function SubtaskInput({ onAdd }: { onAdd: (title: string) => void }) {
+  const [value, setValue] = useState("")
+
+  function submit() {
+    const title = value.trim()
+    if (!title) return
+    onAdd(title)
+    setValue("")
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault()
+            submit()
+          }
+        }}
+        placeholder="Adicionar subtarefa..."
+        className="flex-1 bg-muted/40 rounded-md px-2 py-1 text-xs outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+      />
+      <button
+        onClick={submit}
+        disabled={!value.trim()}
+        className="p-1 rounded-md text-muted-foreground/60 hover:text-primary hover:bg-primary/10 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+      >
+        <Plus size={13} />
+      </button>
+    </div>
+  )
+}
+
+function CustomFieldInput({
+  field,
+  value,
+  onChange
+}: {
+  field: CustomFieldDef
+  value: CustomFieldValue | undefined
+  onChange: (value: CustomFieldValue) => void
+}) {
+  if (field.type === "checkbox") {
+    return (
+      <button
+        onClick={() => onChange(!value)}
+        className={cn(
+          "w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-colors",
+          value ? "bg-primary border-primary text-primary-foreground" : "border-muted-foreground/40 hover:border-primary"
+        )}
+      >
+        {value ? <Check size={8} strokeWidth={3} /> : null}
+      </button>
+    )
+  }
+
+  return (
+    <input
+      type={field.type === "number" ? "number" : field.type === "date" ? "date" : "text"}
+      value={(value as string | number | undefined) ?? ""}
+      onChange={(e) =>
+        onChange(field.type === "number" ? Number(e.target.value) : e.target.value)
+      }
+      className="flex-1 bg-muted/40 rounded-md px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-primary min-w-0"
+    />
+  )
+}
+
 type TaskItemProps = {
   task: Task
   isActive: boolean
@@ -146,6 +273,12 @@ type TaskItemProps = {
   onSave: (data: Partial<Pick<Task, "title" | "description" | "priority" | "estimatedPomodoros">>) => void
   onCancelEdit: () => void
   onSetActive: () => void
+  onAddSubtask: (title: string) => void
+  onToggleSubtask: (subtaskId: string) => void
+  onRemoveSubtask: (subtaskId: string) => void
+  fields: CustomFieldDef[]
+  onSetCustomField: (fieldId: string, value: CustomFieldValue) => void
+  dragHandleProps?: { attributes: React.HTMLAttributes<HTMLButtonElement>; listeners: Record<string, unknown> | undefined }
 }
 
 function TaskItem({
@@ -157,11 +290,18 @@ function TaskItem({
   onDelete,
   onSave,
   onCancelEdit,
-  onSetActive
+  onSetActive,
+  onAddSubtask,
+  onToggleSubtask,
+  onRemoveSubtask,
+  fields,
+  onSetCustomField,
+  dragHandleProps
 }: TaskItemProps) {
   const [expanded, setExpanded] = useState(false)
 
   const pomodoroSlots = Array.from({ length: task.estimatedPomodoros }, (_, i) => i)
+  const doneSubtasks = task.subtasks.filter((s) => s.done).length
 
   return (
     <motion.div
@@ -170,23 +310,33 @@ function TaskItem({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -4 }}
       className={cn(
-        "border border-border rounded-lg overflow-hidden transition-colors",
+        "border border-border rounded-lg overflow-hidden bg-card transition-colors",
         isActive && "border-primary/50 bg-primary/5",
-        task.completed && "opacity-60"
+        task.status === "done" && "opacity-60"
       )}
     >
-      <div className="flex items-start gap-3 p-3">
+      <div className="flex items-start gap-2 p-3">
+        {dragHandleProps && (
+          <button
+            {...dragHandleProps.attributes}
+            {...dragHandleProps.listeners}
+            className="mt-0.5 shrink-0 text-muted-foreground/30 hover:text-muted-foreground cursor-grab active:cursor-grabbing touch-none"
+          >
+            <GripVertical size={14} />
+          </button>
+        )}
+
         {/* Complete toggle */}
         <button
           onClick={onToggle}
           className={cn(
             "mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors",
-            task.completed
+            task.status === "done"
               ? "bg-primary border-primary text-primary-foreground"
               : "border-muted-foreground/40 hover:border-primary"
           )}
         >
-          {task.completed && <Check size={11} strokeWidth={3} />}
+          {task.status === "done" && <Check size={11} strokeWidth={3} />}
         </button>
 
         <div className="flex-1 min-w-0">
@@ -194,7 +344,7 @@ function TaskItem({
             <span
               className={cn(
                 "text-sm font-medium leading-snug",
-                task.completed && "line-through text-muted-foreground"
+                task.status === "done" && "line-through text-muted-foreground"
               )}
             >
               {task.title}
@@ -211,7 +361,7 @@ function TaskItem({
           </div>
 
           {/* Pomodoro progress */}
-          <div className="flex items-center gap-0.5 mt-1">
+          <div className="flex items-center gap-0.5 mt-1 flex-wrap">
             {pomodoroSlots.map((i) => (
               <PomodoroTomato key={i} filled={i < task.completedPomodoros} />
             ))}
@@ -223,23 +373,70 @@ function TaskItem({
                 ⏱ {formatTime(task.focusSeconds)}
               </span>
             )}
+            {task.subtasks.length > 0 && (
+              <span className="text-[10px] text-muted-foreground ml-1.5">
+                ✅ {doneSubtasks}/{task.subtasks.length}
+              </span>
+            )}
           </div>
 
-          {/* Description (expandable) */}
-          {task.description && (
-            <button
-              onClick={() => setExpanded((v) => !v)}
-              className="flex items-center gap-1 text-[11px] text-muted-foreground mt-1 hover:text-foreground transition-colors"
-            >
-              {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-              {expanded ? "Ocultar" : "Ver descrição"}
-            </button>
-          )}
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="flex items-center gap-1 text-[11px] text-muted-foreground mt-1 hover:text-foreground transition-colors"
+          >
+            {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+            {expanded ? "Ocultar detalhes" : "Detalhes"}
+          </button>
 
-          {expanded && task.description && (
-            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-              {task.description}
-            </p>
+          {expanded && (
+            <div className="mt-1.5 flex flex-col gap-2">
+              {task.description && (
+                <p className="text-xs text-muted-foreground leading-relaxed">{task.description}</p>
+              )}
+
+              <div className="flex flex-col gap-1">
+                {task.subtasks.map((s) => (
+                  <div key={s.id} className="flex items-center gap-2 group">
+                    <button
+                      onClick={() => onToggleSubtask(s.id)}
+                      className={cn(
+                        "w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 transition-colors",
+                        s.done
+                          ? "bg-primary border-primary text-primary-foreground"
+                          : "border-muted-foreground/40 hover:border-primary"
+                      )}
+                    >
+                      {s.done && <Check size={8} strokeWidth={3} />}
+                    </button>
+                    <span className={cn("text-xs flex-1", s.done && "line-through text-muted-foreground")}>
+                      {s.title}
+                    </span>
+                    <button
+                      onClick={() => onRemoveSubtask(s.id)}
+                      className="opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-destructive transition-opacity shrink-0"
+                    >
+                      <X size={11} />
+                    </button>
+                  </div>
+                ))}
+                <SubtaskInput onAdd={onAddSubtask} />
+              </div>
+
+              {fields.length > 0 && (
+                <div className="flex flex-col gap-1.5 pt-1 border-t border-border/60">
+                  {fields.map((f) => (
+                    <div key={f.id} className="flex items-center gap-2">
+                      <span className="text-[11px] text-muted-foreground w-20 shrink-0 truncate">{f.name}</span>
+                      <CustomFieldInput
+                        field={f}
+                        value={task.customFields[f.id]}
+                        onChange={(value) => onSetCustomField(f.id, value)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -258,7 +455,7 @@ function TaskItem({
             {isActive ? <Target size={14} /> : <Circle size={14} />}
           </button>
 
-          {!task.completed && (
+          {task.status !== "done" && (
             <button
               onClick={onEdit}
               className="p-1.5 rounded-md text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/60 transition-colors"
@@ -298,6 +495,342 @@ function TaskItem({
   )
 }
 
+// ─── kanban board ───────────────────────────────────────────────────────────
+
+type CardHandlers = Omit<TaskItemProps, "task" | "dragHandleProps">
+
+function SortableCard({ task, handlers }: { task: Task; handlers: CardHandlers }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    // DragOverlay renders the "real" card following the cursor — this slot
+    // just holds the gap open, so it goes fully invisible instead of ghosting.
+    opacity: isDragging ? 0 : 1
+  }
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <TaskItem task={task} dragHandleProps={{ attributes, listeners }} {...handlers} />
+    </div>
+  )
+}
+
+function AddColumnButton({ onAdd }: { onAdd: (label: string) => void }) {
+  const [adding, setAdding] = useState(false)
+  const [value, setValue] = useState("")
+
+  function submit() {
+    const label = value.trim()
+    if (label) onAdd(label)
+    setValue("")
+    setAdding(false)
+  }
+
+  if (!adding) {
+    return (
+      <button
+        onClick={() => setAdding(true)}
+        className="w-72 shrink-0 h-fit flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground border border-dashed border-border rounded-xl p-3 hover:bg-muted/30 transition-colors"
+      >
+        <Plus size={14} /> Nova coluna
+      </button>
+    )
+  }
+
+  return (
+    <div className="w-72 shrink-0 bg-muted/30 rounded-xl p-3 flex flex-col gap-2 h-fit">
+      <input
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") submit()
+          if (e.key === "Escape") setAdding(false)
+        }}
+        placeholder="Nome da coluna"
+        className="bg-background rounded-md px-2 py-1.5 text-sm outline-none focus:ring-1 focus:ring-primary"
+      />
+      <div className="flex gap-2 justify-end">
+        <Button type="button" variant="ghost" size="sm" onClick={() => setAdding(false)}>
+          Cancelar
+        </Button>
+        <Button size="sm" onClick={submit} disabled={!value.trim()}>
+          Adicionar
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function KanbanColumn({
+  column,
+  taskIds,
+  tasks,
+  getHandlers,
+  onRename,
+  onRemove,
+  canRemove
+}: {
+  column: Column
+  taskIds: string[]
+  tasks: Task[]
+  getHandlers: (task: Task) => CardHandlers
+  onRename: (label: string) => void
+  onRemove: () => void
+  canRemove: boolean
+}) {
+  const { setNodeRef: setDroppableRef } = useDroppable({ id: "column-" + column.id })
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setSortableRef,
+    transform,
+    transition,
+    isDragging
+  } = useSortable({ id: column.id })
+  const [editing, setEditing] = useState(false)
+  const [label, setLabel] = useState(column.label)
+  const columnTasks = taskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => t !== undefined)
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1
+  }
+
+  function commitRename() {
+    const trimmed = label.trim()
+    if (trimmed && trimmed !== column.label) onRename(trimmed)
+    else setLabel(column.label)
+    setEditing(false)
+  }
+
+  return (
+    <div
+      ref={setSortableRef}
+      style={style}
+      className="flex flex-col w-72 shrink-0 bg-muted/30 rounded-xl p-3 gap-2 h-full"
+    >
+      <div className="flex items-center justify-between px-1 shrink-0 gap-1.5">
+        <button
+          {...attributes}
+          {...listeners}
+          title="Arrastar coluna"
+          className="text-muted-foreground/30 hover:text-muted-foreground cursor-grab active:cursor-grabbing touch-none shrink-0"
+        >
+          <GripVertical size={13} />
+        </button>
+        {editing ? (
+          <input
+            autoFocus
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitRename()
+              if (e.key === "Escape") {
+                setLabel(column.label)
+                setEditing(false)
+              }
+            }}
+            className="flex-1 bg-transparent border-b border-primary text-xs font-semibold uppercase tracking-wide outline-none min-w-0"
+          />
+        ) : (
+          <h3
+            onClick={() => setEditing(true)}
+            title="Clique para renomear"
+            className="text-xs font-semibold text-muted-foreground tracking-wide uppercase truncate cursor-text hover:text-foreground transition-colors"
+          >
+            {column.label}
+          </h3>
+        )}
+        <div className="flex items-center gap-1 shrink-0">
+          <span className="text-[10px] text-muted-foreground bg-muted rounded-full px-1.5 py-0.5">
+            {columnTasks.length}
+          </span>
+          {canRemove && (
+            <button
+              onClick={onRemove}
+              title="Remover coluna"
+              className="text-muted-foreground/40 hover:text-destructive transition-colors"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      </div>
+      <div ref={setDroppableRef} className="flex flex-col gap-2 overflow-y-auto flex-1 pr-0.5">
+        <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
+          {columnTasks.map((task) => (
+            <SortableCard key={task.id} task={task} handlers={getHandlers(task)} />
+          ))}
+        </SortableContext>
+        {columnTasks.length === 0 && (
+          <div className="text-[11px] text-muted-foreground/60 text-center py-4 border border-dashed border-border rounded-lg">
+            Arraste tarefas aqui
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function buildColumnMap(tasks: Task[], columns: Column[]): Record<string, string[]> {
+  const map: Record<string, string[]> = {}
+  columns.forEach((c) => {
+    map[c.id] = tasksInStatus(tasks, c.id).map((t) => t.id)
+  })
+  return map
+}
+
+function KanbanBoard({
+  tasks,
+  columns,
+  onSetStatus,
+  onReorderColumn,
+  onAddColumn,
+  onRenameColumn,
+  onRemoveColumn,
+  onReorderColumns,
+  getHandlers
+}: {
+  tasks: Task[]
+  columns: Column[]
+  onSetStatus: (id: string, status: TaskStatus) => void
+  onReorderColumn: (status: TaskStatus, orderedIds: string[]) => void
+  onAddColumn: (label: string) => void
+  onRenameColumn: (id: string, label: string) => void
+  onRemoveColumn: (id: string) => void
+  onReorderColumns: (orderedIds: string[]) => void
+  getHandlers: (task: Task) => CardHandlers
+}) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
+
+  const [activeId, setActiveId] = useState<string | null>(null)
+  // Local, optimistic column layout used only while dragging — lets a card
+  // move into another column the instant you hover over it, instead of
+  // waiting for drop. `null` outside a drag, so the resting layout is always
+  // derived fresh from `tasks`/`columns` and can never drift from them.
+  const [dragMap, setDragMap] = useState<Record<string, string[]> | null>(null)
+
+  const columnMap = dragMap ?? buildColumnMap(tasks, columns)
+
+  function findColumnOf(id: string): string | undefined {
+    return Object.keys(columnMap).find((colId) => columnMap[colId].includes(id))
+  }
+
+  function isColumnId(id: string) {
+    return columns.some((c) => c.id === id)
+  }
+
+  function handleDragStart(event: DragStartEvent) {
+    setActiveId(String(event.active.id))
+    setDragMap(buildColumnMap(tasks, columns))
+  }
+
+  function handleDragOver(event: DragOverEvent) {
+    const { active, over } = event
+    if (!over) return
+    if (isColumnId(String(active.id))) return // column order preview is handled by SortableContext itself
+
+    const activeId = String(active.id)
+    const overId = String(over.id)
+    const sourceCol = findColumnOf(activeId)
+    const targetCol = overId.startsWith("column-") ? overId.slice("column-".length) : findColumnOf(overId)
+    if (!sourceCol || !targetCol || sourceCol === targetCol) return
+
+    setDragMap((prev) => {
+      const map = prev ?? buildColumnMap(tasks, columns)
+      const sourceIds = map[sourceCol].filter((id) => id !== activeId)
+      const destIds = [...map[targetCol]]
+      const insertAt = overId.startsWith("column-") ? destIds.length : destIds.indexOf(overId)
+      destIds.splice(insertAt === -1 ? destIds.length : insertAt, 0, activeId)
+      return { ...map, [sourceCol]: sourceIds, [targetCol]: destIds }
+    })
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    const activeId = String(active.id)
+    setActiveId(null)
+    setDragMap(null)
+    if (!over) return
+
+    if (isColumnId(activeId)) {
+      const overId = String(over.id)
+      const ids = columns.map((c) => c.id)
+      const oldIndex = ids.indexOf(activeId)
+      const newIndex = ids.indexOf(overId)
+      if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return
+      onReorderColumns(arrayMove(ids, oldIndex, newIndex))
+      return
+    }
+
+    const finalCol = findColumnOf(activeId)
+    const ids = finalCol ? columnMap[finalCol] : null
+    if (!finalCol || !ids) return
+
+    const overId = String(over.id)
+    const oldIndex = ids.indexOf(activeId)
+    const newIndex = overId.startsWith("column-") ? ids.length - 1 : ids.indexOf(overId)
+    const reordered = oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex ? arrayMove(ids, oldIndex, newIndex) : ids
+
+    const original = tasks.find((t) => t.id === activeId)
+    if (original && original.status !== finalCol) onSetStatus(activeId, finalCol)
+    onReorderColumn(finalCol, reordered)
+  }
+
+  const draggingColumn = activeId ? columns.find((c) => c.id === activeId) : undefined
+  const activeTask = activeId && !draggingColumn ? tasks.find((t) => t.id === activeId) : undefined
+
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
+      onDragEnd={handleDragEnd}
+    >
+      <SortableContext items={columns.map((c) => c.id)} strategy={horizontalListSortingStrategy}>
+        <div className="flex gap-3 overflow-x-auto flex-1 pb-2 items-stretch">
+          {columns.map((column) => (
+            <KanbanColumn
+              key={column.id}
+              column={column}
+              taskIds={columnMap[column.id] ?? []}
+              tasks={tasks}
+              getHandlers={getHandlers}
+              onRename={(label) => onRenameColumn(column.id, label)}
+              onRemove={() => onRemoveColumn(column.id)}
+              canRemove={columns.length > 1}
+            />
+          ))}
+          <AddColumnButton onAdd={onAddColumn} />
+        </div>
+      </SortableContext>
+
+      <DragOverlay>
+        {activeTask && (
+          <div className="rotate-2 shadow-xl">
+            <TaskItem task={activeTask} {...getHandlers(activeTask)} />
+          </div>
+        )}
+        {draggingColumn && (
+          <div className="w-72 bg-muted/60 border border-border rounded-xl p-3 shadow-xl rotate-1">
+            <span className="text-xs font-semibold text-muted-foreground tracking-wide uppercase">
+              {draggingColumn.label}
+            </span>
+          </div>
+        )}
+      </DragOverlay>
+    </DndContext>
+  )
+}
+
 // ─── main component ───────────────────────────────────────────────────────────
 
 export function TasksView({
@@ -307,19 +840,32 @@ export function TasksView({
   onUpdate,
   onRemove,
   onToggle,
-  onSetActiveTask
+  onSetStatus,
+  onReorderColumn,
+  onSetActiveTask,
+  onAddSubtask,
+  onToggleSubtask,
+  onRemoveSubtask,
+  columns,
+  onAddColumn,
+  onRenameColumn,
+  onRemoveColumn,
+  onReorderColumns,
+  fields,
+  onSetCustomField
 }: Props) {
+  const [viewMode, setViewMode] = useState<ViewMode>("kanban")
   const [filter, setFilter] = useState<Filter>("all")
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
-  const active = tasks.filter((t) => !t.completed)
-  const completed = tasks.filter((t) => t.completed)
+  const active = tasks.filter((t) => t.status !== "done")
+  const completed = tasks.filter((t) => t.status === "done")
 
   const filtered = (() => {
     const source = filter === "active" ? active : filter === "completed" ? completed : tasks
     return [...source].sort((a, b) => {
-      if (a.completed !== b.completed) return a.completed ? 1 : -1
+      if ((a.status === "done") !== (b.status === "done")) return a.status === "done" ? 1 : -1
       const pd = priorityOrder[a.priority] - priorityOrder[b.priority]
       if (pd !== 0) return pd
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -343,14 +889,35 @@ export function TasksView({
     setEditingId(null)
   }
 
+  function getHandlers(task: Task): CardHandlers {
+    return {
+      isActive: task.id === activeTaskId,
+      isEditing: editingId === task.id,
+      onToggle: () => onToggle(task.id),
+      onEdit: () => handleEdit(task.id),
+      onDelete: () => {
+        onRemove(task.id)
+        if (editingId === task.id) setEditingId(null)
+      },
+      onSave: (data) => handleSave(task.id, data),
+      onCancelEdit: () => setEditingId(null),
+      onSetActive: () => onSetActiveTask(task.id === activeTaskId ? null : task.id),
+      onAddSubtask: (title) => onAddSubtask(task.id, title),
+      onToggleSubtask: (subtaskId) => onToggleSubtask(task.id, subtaskId),
+      onRemoveSubtask: (subtaskId) => onRemoveSubtask(task.id, subtaskId),
+      fields,
+      onSetCustomField: (fieldId, value) => onSetCustomField(task.id, fieldId, value)
+    }
+  }
+
   const counts = { all: tasks.length, active: active.length, completed: completed.length }
   const filterLabels: Record<Filter, string> = { all: "Todas", active: "Ativas", completed: "Concluídas" }
 
   return (
-    <div className="flex flex-col h-full p-6 max-w-2xl mx-auto w-full overflow-hidden">
+    <div className={cn("flex flex-col h-full p-6 w-full overflow-hidden", viewMode === "list" && "max-w-2xl mx-auto")}>
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 gap-3">
         <div>
           <h1 className="text-xl font-semibold">Tarefas</h1>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -358,23 +925,48 @@ export function TasksView({
           </p>
         </div>
 
-        <Button
-          size="sm"
-          onClick={() => {
-            setShowAddForm((v) => !v)
-            if (editingId) setEditingId(null)
-          }}
-          className="gap-1.5"
-        >
-          {showAddForm ? <X size={14} /> : <Plus size={14} />}
-          {showAddForm ? "Cancelar" : "Nova Tarefa"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1 bg-muted/40 p-1 rounded-lg">
+            <button
+              onClick={() => setViewMode("list")}
+              title="Lista"
+              className={cn(
+                "p-1.5 rounded-md transition-colors",
+                viewMode === "list" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <ListIcon size={14} />
+            </button>
+            <button
+              onClick={() => setViewMode("kanban")}
+              title="Kanban"
+              className={cn(
+                "p-1.5 rounded-md transition-colors",
+                viewMode === "kanban" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <LayoutGrid size={14} />
+            </button>
+          </div>
+
+          <Button
+            size="sm"
+            onClick={() => {
+              setShowAddForm((v) => !v)
+              if (editingId) setEditingId(null)
+            }}
+            className="gap-1.5"
+          >
+            {showAddForm ? <X size={14} /> : <Plus size={14} />}
+            {showAddForm ? "Cancelar" : "Nova Tarefa"}
+          </Button>
+        </div>
       </div>
 
       {/* Add form */}
       <AnimatePresence>
         {showAddForm && (
-          <div className="mb-4">
+          <div className={cn("mb-4", viewMode === "kanban" && "max-w-2xl")}>
             <TaskForm
               onSubmit={handleAdd}
               onCancel={() => setShowAddForm(false)}
@@ -384,65 +976,65 @@ export function TasksView({
         )}
       </AnimatePresence>
 
-      {/* Filter tabs */}
-      <div className="flex gap-1 mb-4 bg-muted/40 p-1 rounded-lg self-start">
-        {(["all", "active", "completed"] as Filter[]).map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={cn(
-              "px-3 py-1 rounded-md text-xs font-medium transition-colors",
-              filter === f
-                ? "bg-background shadow-sm text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            {filterLabels[f]}
-            <span className="ml-1 opacity-60">({counts[f]})</span>
-          </button>
-        ))}
-      </div>
+      {viewMode === "kanban" ? (
+        <KanbanBoard
+          tasks={tasks}
+          columns={columns}
+          onSetStatus={onSetStatus}
+          onReorderColumn={onReorderColumn}
+          onAddColumn={onAddColumn}
+          onRenameColumn={onRenameColumn}
+          onRemoveColumn={onRemoveColumn}
+          onReorderColumns={onReorderColumns}
+          getHandlers={getHandlers}
+        />
+      ) : (
+        <>
+          {/* Filter tabs */}
+          <div className="flex gap-1 mb-4 bg-muted/40 p-1 rounded-lg self-start">
+            {(["all", "active", "completed"] as Filter[]).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={cn(
+                  "px-3 py-1 rounded-md text-xs font-medium transition-colors",
+                  filter === f
+                    ? "bg-background shadow-sm text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {filterLabels[f]}
+                <span className="ml-1 opacity-60">({counts[f]})</span>
+              </button>
+            ))}
+          </div>
 
-      {/* Task list */}
-      <div className="flex flex-col gap-2 overflow-y-auto flex-1 pr-1">
-        <AnimatePresence mode="popLayout">
-          {filtered.map((task) => (
-            <TaskItem
-              key={task.id}
-              task={task}
-              isActive={task.id === activeTaskId}
-              isEditing={editingId === task.id}
-              onToggle={() => onToggle(task.id)}
-              onEdit={() => handleEdit(task.id)}
-              onDelete={() => {
-                onRemove(task.id)
-                if (editingId === task.id) setEditingId(null)
-              }}
-              onSave={(data) => handleSave(task.id, data)}
-              onCancelEdit={() => setEditingId(null)}
-              onSetActive={() =>
-                onSetActiveTask(task.id === activeTaskId ? null : task.id)
-              }
-            />
-          ))}
-        </AnimatePresence>
+          {/* Task list */}
+          <div className="flex flex-col gap-2 overflow-y-auto flex-1 pr-1">
+            <AnimatePresence mode="popLayout">
+              {filtered.map((task) => (
+                <TaskItem key={task.id} task={task} {...getHandlers(task)} />
+              ))}
+            </AnimatePresence>
 
-        {filtered.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
-            <div className="text-4xl mb-3">
-              {filter === "completed" ? "🎉" : "📋"}
-            </div>
-            <p className="text-sm font-medium">
-              {filter === "all" && "Nenhuma tarefa ainda"}
-              {filter === "active" && "Nenhuma tarefa ativa"}
-              {filter === "completed" && "Nenhuma tarefa concluída"}
-            </p>
-            {filter === "all" && (
-              <p className="text-xs mt-1">Clique em "Nova Tarefa" para começar</p>
+            {filtered.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
+                <div className="text-4xl mb-3">
+                  {filter === "completed" ? "🎉" : "📋"}
+                </div>
+                <p className="text-sm font-medium">
+                  {filter === "all" && "Nenhuma tarefa ainda"}
+                  {filter === "active" && "Nenhuma tarefa ativa"}
+                  {filter === "completed" && "Nenhuma tarefa concluída"}
+                </p>
+                {filter === "all" && (
+                  <p className="text-xs mt-1">Clique em "Nova Tarefa" para começar</p>
+                )}
+              </div>
             )}
           </div>
-        )}
-      </div>
+        </>
+      )}
     </div>
   )
 }

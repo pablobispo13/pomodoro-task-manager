@@ -1,11 +1,16 @@
+import { Download } from "lucide-react"
 import { formatTime } from "@/utils/formatTime"
+import { loadDailyStats } from "@/utils/dailyStats"
+import { exportDailyStatsCSV, exportDailyStatsJSON, exportTasksCSV, exportTasksJSON } from "@/utils/exportData"
 import type { Task } from "@/hooks/useTasks"
+import type { CustomFieldDef } from "@/hooks/useCustomFields"
 
 type Props = {
   sessions: number
   dailyFocus: number
   deepFocus: number
   tasks: Task[]
+  fields: CustomFieldDef[]
 }
 
 function getLastNDays(n: number) {
@@ -26,25 +31,45 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
   )
 }
 
-export function DashboardView({ sessions, dailyFocus, deepFocus, tasks }: Props) {
+function ExportButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+    >
+      <Download size={12} />
+      {label}
+    </button>
+  )
+}
+
+export function DashboardView({ sessions, dailyFocus, deepFocus, tasks, fields }: Props) {
   const days = getLastNDays(7)
   const dayLabels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"] as const
 
+  const statsMap = loadDailyStats()
   const weekData = days.map((key) => {
-    const focusSec = Number(localStorage.getItem("focus-" + key) ?? 0)
-    const sess = Number(localStorage.getItem("sessions-" + key) ?? 0)
-    return { key, focusMin: Math.round(focusSec / 60), sessions: sess }
+    const stats = statsMap[key]
+    return { key, focusMin: Math.round((stats?.focusSeconds ?? 0) / 60), sessions: stats?.sessions ?? 0 }
   })
 
   const maxFocusMin = Math.max(...weekData.map((d) => d.focusMin), 1)
 
-  const completedTasks = tasks.filter((t) => t.completed)
-  const activeTasks = tasks.filter((t) => !t.completed)
-  const completionRate =
-    tasks.length > 0 ? Math.round((completedTasks.length / tasks.length) * 100) : 0
+  // Meetings are timesheet entries, not pomodoro work — keep them out of the
+  // task completion/estimate stats below, they get their own section.
+  const pomodoroTasks = tasks.filter((t) => t.kind === "pomodoro")
+  const meetings = tasks
+    .filter((t) => t.kind === "meeting")
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 
-  const totalPomodorosEstimated = tasks.reduce((s, t) => s + t.estimatedPomodoros, 0)
-  const totalPomodorosDone = tasks.reduce((s, t) => s + t.completedPomodoros, 0)
+  const completedTasks = pomodoroTasks.filter((t) => t.status === "done")
+  const activeTasks = pomodoroTasks.filter((t) => t.status !== "done")
+  const completionRate =
+    pomodoroTasks.length > 0 ? Math.round((completedTasks.length / pomodoroTasks.length) * 100) : 0
+
+  const totalPomodorosEstimated = pomodoroTasks.reduce((s, t) => s + t.estimatedPomodoros, 0)
+  const totalPomodorosDone = pomodoroTasks.reduce((s, t) => s + t.completedPomodoros, 0)
+  const totalMeetingSeconds = meetings.reduce((s, t) => s + t.focusSeconds, 0)
 
   return (
     <div className="flex flex-col h-full p-6 max-w-2xl mx-auto w-full overflow-y-auto gap-6">
@@ -126,7 +151,7 @@ export function DashboardView({ sessions, dailyFocus, deepFocus, tasks }: Props)
           <StatCard
             label="Taxa de conclusão"
             value={`${completionRate}%`}
-            sub={`${completedTasks.length} de ${tasks.length} concluídas`}
+            sub={`${completedTasks.length} de ${pomodoroTasks.length} concluídas`}
           />
           <StatCard
             label="Pomodoros de tarefas"
@@ -167,6 +192,56 @@ export function DashboardView({ sessions, dailyFocus, deepFocus, tasks }: Props)
             </div>
           </div>
         )}
+      </section>
+
+      {/* Timesheet (meetings) — separate from pomodoro session tracking */}
+      {meetings.length > 0 && (
+        <section>
+          <h2 className="text-sm font-medium text-muted-foreground mb-3 tracking-wide">TIMESHEET</h2>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <StatCard label="Reuniões" value={String(meetings.length)} sub="registradas" />
+            <StatCard label="Tempo total" value={formatTime(totalMeetingSeconds)} sub="hh:mm:ss" />
+          </div>
+          <div className="bg-card border border-border rounded-xl p-4">
+            <div className="flex flex-col gap-1.5">
+              {meetings.slice(0, 5).map((m) => (
+                <div key={m.id} className="flex items-center gap-2 text-sm">
+                  <div className="w-2 h-2 rounded-full shrink-0 bg-amber-500" />
+                  <span className="truncate">{m.title}</span>
+                  <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
+                    ⏱ {formatTime(m.focusSeconds)}
+                    {m.status === "doing" && <> · em andamento</>}
+                  </span>
+                </div>
+              ))}
+              {meetings.length > 5 && (
+                <p className="text-xs text-muted-foreground mt-1">+{meetings.length - 5} mais...</p>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Export */}
+      <section>
+        <h2 className="text-sm font-medium text-muted-foreground mb-3 tracking-wide">EXPORTAR DADOS</h2>
+        <div className="bg-card border border-border rounded-xl p-4 flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <span className="text-sm">Estatísticas diárias</span>
+            <div className="flex gap-2">
+              <ExportButton label="CSV" onClick={() => exportDailyStatsCSV(statsMap)} />
+              <ExportButton label="JSON" onClick={() => exportDailyStatsJSON(statsMap)} />
+            </div>
+          </div>
+          <div className="border-t border-border" />
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <span className="text-sm">Tarefas</span>
+            <div className="flex gap-2">
+              <ExportButton label="CSV" onClick={() => exportTasksCSV(tasks, fields)} />
+              <ExportButton label="JSON" onClick={() => exportTasksJSON(tasks)} />
+            </div>
+          </div>
+        </div>
       </section>
 
     </div>

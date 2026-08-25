@@ -1,8 +1,12 @@
+import { useRef, useState } from "react"
+import { Button } from "@/components/ui/button"
 import { DEFAULT_SETTINGS, type PomodoroSettings } from "@/hooks/useSettings"
 import { useAutoLaunch } from "@/hooks/useAutoLaunch"
 import { ACCENT_COLORS, type AccentColor } from "@/utils/accentColors"
 import { useTheme } from "@/components/theme-provider"
-import { Moon, Sun, Monitor, Timer, Palette, Check, Power } from "lucide-react"
+import { requestNotificationPermission } from "@/utils/notify"
+import { exportAllData, importAllData } from "@/utils/backup"
+import { Moon, Sun, Monitor, Timer, Palette, Check, Power, Bell, Download, Upload } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 type Props = {
@@ -121,6 +125,27 @@ const themeOptions = [
 export function SettingsView({ settings, onUpdate, onReset }: Props) {
   const { theme, setTheme } = useTheme()
   const autoLaunch = useAutoLaunch()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [importMessage, setImportMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
+
+  function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ""
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = importAllData(String(reader.result))
+      if (result.ok) {
+        setImportMessage({ type: "success", text: "Backup importado! Recarregando..." })
+        setTimeout(() => window.location.reload(), 800)
+      } else {
+        setImportMessage({ type: "error", text: result.error })
+      }
+    }
+    reader.onerror = () => setImportMessage({ type: "error", text: "Não foi possível ler o arquivo." })
+    reader.readAsText(file)
+  }
 
   const isDefault =
     settings.focusDuration === DEFAULT_SETTINGS.focusDuration &&
@@ -128,7 +153,8 @@ export function SettingsView({ settings, onUpdate, onReset }: Props) {
     settings.longBreakDuration === DEFAULT_SETTINGS.longBreakDuration &&
     settings.sessionsBeforeLongBreak === DEFAULT_SETTINGS.sessionsBeforeLongBreak &&
     settings.autoStartBreaks === DEFAULT_SETTINGS.autoStartBreaks &&
-    settings.accentColor === DEFAULT_SETTINGS.accentColor
+    settings.accentColor === DEFAULT_SETTINGS.accentColor &&
+    settings.notificationsEnabled === DEFAULT_SETTINGS.notificationsEnabled
 
   return (
     <div className="flex flex-col h-full p-6 max-w-xl mx-auto w-full overflow-y-auto gap-5">
@@ -277,6 +303,23 @@ export function SettingsView({ settings, onUpdate, onReset }: Props) {
         />
       </section>
 
+      {/* ── Notificações ──────────────────────────────────────────────────── */}
+      <section className="bg-card border border-border rounded-xl p-5 flex flex-col gap-5">
+        <SectionTitle icon={Bell}>Notificações</SectionTitle>
+
+        <ToggleField
+          label="Notificações do sistema"
+          description="Avisa quando uma sessão de foco ou pausa começa"
+          value={settings.notificationsEnabled}
+          onChange={(v) => {
+            onUpdate({ notificationsEnabled: v })
+            // Must run inside this click handler — browsers ignore permission
+            // requests fired later from a timer-driven effect.
+            if (v) requestNotificationPermission()
+          }}
+        />
+      </section>
+
       {/* ── Sistema ───────────────────────────────────────────────────────── */}
       {autoLaunch.supported && (
         <section className="bg-card border border-border rounded-xl p-5 flex flex-col gap-5">
@@ -290,6 +333,44 @@ export function SettingsView({ settings, onUpdate, onReset }: Props) {
           />
         </section>
       )}
+
+      {/* ── Dados ─────────────────────────────────────────────────────────── */}
+      <section className="bg-card border border-border rounded-xl p-5 flex flex-col gap-4">
+        <SectionTitle icon={Download}>Dados</SectionTitle>
+        <p className="text-xs text-muted-foreground -mt-1">
+          Exporte um backup completo (tarefas, colunas, campos, configurações e estatísticas) ou restaure a
+          partir de um arquivo exportado anteriormente.
+        </p>
+
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={exportAllData}>
+            <Download size={14} />
+            Exportar backup
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload size={14} />
+            Importar backup
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json"
+            onChange={handleImportFile}
+            className="hidden"
+          />
+        </div>
+
+        {importMessage && (
+          <p className={cn("text-xs", importMessage.type === "error" ? "text-destructive" : "text-primary")}>
+            {importMessage.text}
+          </p>
+        )}
+      </section>
 
       {/* ── Reset ─────────────────────────────────────────────────────────── */}
       {!isDefault && (

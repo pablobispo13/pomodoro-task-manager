@@ -1,11 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { DEFAULT_SETTINGS, type PomodoroSettings } from "./useSettings"
+import { EMPTY_STATS, loadDailyStats, persistDailyStats, todayKey, type DailyStats } from "@/utils/dailyStats"
 
 export type Mode = "focus" | "shortBreak" | "longBreak"
-
-function todayKey() {
-  return new Date().toISOString().slice(0, 10)
-}
 
 export function usePomodoro(config?: PomodoroSettings) {
   const cfg = { ...DEFAULT_SETTINGS, ...config }
@@ -23,15 +20,28 @@ export function usePomodoro(config?: PomodoroSettings) {
   const [time, setTime] = useState(times.focus)
   const [running, setRunning] = useState(false)
 
+  // Lazy-init pattern: read once on first render, mutate in place afterwards —
+  // only ever touched from effects/callbacks, never read during render itself.
+  const statsMapRef = useRef<Record<string, DailyStats> | null>(null)
+  if (statsMapRef.current === null) statsMapRef.current = loadDailyStats()
+
   const [dailyFocus, setDailyFocus] = useState(
-    () => Number(localStorage.getItem("focus-" + todayKey()) ?? 0)
+    () => loadDailyStats()[todayKey()]?.focusSeconds ?? EMPTY_STATS.focusSeconds
   )
   const [sessions, setSessions] = useState(
-    () => Number(localStorage.getItem("sessions-" + todayKey()) ?? 0)
+    () => loadDailyStats()[todayKey()]?.sessions ?? EMPTY_STATS.sessions
   )
   const [deepFocus, setDeepFocus] = useState(
-    () => Number(localStorage.getItem("deep-" + todayKey()) ?? 0)
+    () => loadDailyStats()[todayKey()]?.deepFocusSeconds ?? EMPTY_STATS.deepFocusSeconds
   )
+
+  function persistTodayField(field: keyof DailyStats, value: number) {
+    const map = statsMapRef.current!
+    const key = todayKey()
+    const current = map[key] ?? EMPTY_STATS
+    map[key] = { ...current, [field]: value }
+    persistDailyStats(map)
+  }
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   // timeRef is the source-of-truth for the interval tick —
@@ -76,7 +86,7 @@ export function usePomodoro(config?: PomodoroSettings) {
         focusLengthRef.current += 1
         setDailyFocus((f) => {
           const next = f + 1
-          localStorage.setItem("focus-" + todayKey(), String(next))
+          persistTodayField("focusSeconds", next)
           return next
         })
       }
@@ -85,13 +95,13 @@ export function usePomodoro(config?: PomodoroSettings) {
         if (currentMode === "focus") {
           const nextSessions = sessionsRef.current + 1
           setSessions(nextSessions)
-          localStorage.setItem("sessions-" + todayKey(), String(nextSessions))
+          persistTodayField("sessions", nextSessions)
 
           if (focusLengthRef.current >= 15 * 60) {
             const focusLen = focusLengthRef.current
             setDeepFocus((d) => {
               const next = d + focusLen
-              localStorage.setItem("deep-" + todayKey(), String(next))
+              persistTodayField("deepFocusSeconds", next)
               return next
             })
           }

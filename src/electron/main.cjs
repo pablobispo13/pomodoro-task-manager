@@ -1,9 +1,20 @@
-import { app, BrowserWindow, ipcMain } from "electron"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
+// CommonJS, not ESM: Electron's "electron" module is a native binding that
+// only resolves correctly through require() — with `import` (named or
+// default) Node's ESM loader either throws "does not provide an export
+// named ..." or silently resolves to the npm package's path-string shim
+// instead of the real API, depending on the exact Electron/Node build.
+// preload.cjs already worked around this the same way; main.js didn't, and
+// never actually booted as a result.
+const { app, BrowserWindow, ipcMain, Notification } = require("electron")
+const path = require("node:path")
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+// Windows silently drops toast notifications from apps without a registered
+// AppUserModelID — Notification.isSupported() still returns true and .show()
+// never throws, so this fails with zero errors unless you know to look for it.
+// Must match the electron-builder "appId" in package.json.
+if (process.platform === "win32") {
+  app.setAppUserModelId("com.pablobispo.pomodorotaskmanager")
+}
 
 let mainWindow = null
 
@@ -83,6 +94,14 @@ app.whenReady().then(() => {
 
   ipcMain.on("set-auto-launch", (_, enabled) => {
     app.setLoginItemSettings({ openAtLogin: enabled })
+  })
+
+  ipcMain.on("show-notification", (_, title, body) => {
+    if (!Notification.isSupported()) {
+      console.warn("[notifications] Notification.isSupported() is false — OS toast will not show")
+      return
+    }
+    new Notification({ title, body }).show()
   })
 
   createWindow()

@@ -1,14 +1,16 @@
-import { BarChart2, CheckSquare, Settings, Timer } from "lucide-react"
+import { BarChart2, CheckSquare, LayoutList, Settings, Timer } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { MeetingTimerWidget } from "@/components/app/MeetingTimerWidget"
 import { motion } from "framer-motion"
 import { cn } from "@/lib/utils"
 
-export type View = "pomodoro" | "tasks" | "dashboard" | "settings"
+export type View = "pomodoro" | "tasks" | "dashboard" | "registry" | "settings"
 
 const items: { name: string; label: string; icon: React.ElementType; view: View }[] = [
   { name: "Pomodoro", label: "Pomodoro", icon: Timer, view: "pomodoro" },
   { name: "Tasks", label: "Tarefas", icon: CheckSquare, view: "tasks" },
   { name: "Dashboard", label: "Dashboard", icon: BarChart2, view: "dashboard" },
+  { name: "Registry", label: "Cadastros", icon: LayoutList, view: "registry" },
   { name: "Settings", label: "Configurações", icon: Settings, view: "settings" }
 ]
 
@@ -16,9 +18,15 @@ type Props = {
   collapsed: boolean
   activeView: View
   onNavigate: (view: View) => void
+  meeting: {
+    running: boolean
+    elapsed: number
+    onStart: () => void
+    onStop: () => void
+  }
 }
 
-export function Sidebar({ collapsed, activeView, onNavigate }: Props) {
+export function Sidebar({ collapsed, activeView, onNavigate, meeting }: Props) {
   return (
     <motion.div
       animate={{ width: collapsed ? 53 : 224 }}
@@ -53,6 +61,14 @@ export function Sidebar({ collapsed, activeView, onNavigate }: Props) {
           )
         })}
       </div>
+
+      <MeetingTimerWidget
+        collapsed={collapsed}
+        running={meeting.running}
+        elapsed={meeting.elapsed}
+        onStart={meeting.onStart}
+        onStop={meeting.onStop}
+      />
     </motion.div>
   )
 }

@@ -8,6 +8,7 @@ export type PomodoroSettings = {
   autoStartBreaks: boolean
   sessionsBeforeLongBreak: number
   accentColor: AccentColor
+  notificationsEnabled: boolean
 }
 
 export const DEFAULT_SETTINGS: PomodoroSettings = {
@@ -16,10 +17,11 @@ export const DEFAULT_SETTINGS: PomodoroSettings = {
   longBreakDuration: 15,
   autoStartBreaks: true,
   sessionsBeforeLongBreak: 4,
-  accentColor: DEFAULT_ACCENT
+  accentColor: DEFAULT_ACCENT,
+  notificationsEnabled: true
 }
 
-const STORAGE_KEY = "pomodoro-settings"
+export const STORAGE_KEY = "pomodoro-settings"
 
 export function useSettings() {
   const [settings, setSettings] = useState<PomodoroSettings>(() => {

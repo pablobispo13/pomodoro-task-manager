@@ -11,3 +11,7 @@ contextBridge.exposeInMainWorld("windowControls", {
   getAutoLaunch: () => ipcRenderer.invoke("get-auto-launch"),
   setAutoLaunch: (enabled) => ipcRenderer.send("set-auto-launch", enabled)
 })
+
+contextBridge.exposeInMainWorld("notifications", {
+  show: (title, body) => ipcRenderer.send("show-notification", title, body)
+})

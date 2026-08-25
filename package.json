@@ -2,11 +2,13 @@
   "name": "pomodoro-task-manager-app",
   "private": true,
   "version": "0.0.1",
+  "description": "Aplicativo de pomodoro e gerenciamento de tarefas com Kanban, para Electron e web.",
+  "author": "Pablo Bispo",
   "type": "module",
-  "main": "src/electron/main.js",
+  "main": "src/electron/main.cjs",
   "scripts": {
     "dev": "concurrently \"vite\" \"npm:electron\"",
-    "electron": "wait-on http://localhost:5173 && electron src/electron/main.js",
+    "electron": "wait-on http://localhost:5173 && electron src/electron/main.cjs",
     "build": "tsc -b && vite build",
     "dist:win": "npm run build && electron-builder --win",
     "lint": "eslint .",
@@ -36,6 +38,9 @@
     }
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@fontsource-variable/inter": "^5.2.8",
     "@remixicon/react": "^4.9.0",
     "@tailwindcss/vite": "^4.1.17",
