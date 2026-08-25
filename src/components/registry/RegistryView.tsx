@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import type { Column } from "@/hooks/useColumns"
 import type { CustomFieldDef, CustomFieldType } from "@/hooks/useCustomFields"
 
@@ -16,6 +17,7 @@ type Props = {
   columns: Column[]
   onAddColumn: (label: string) => void
   onRenameColumn: (id: string, label: string) => void
+  onSetWipLimit: (id: string, limit: number | undefined) => void
   onRemoveColumn: (id: string) => void
   onMoveColumn: (id: string, direction: "up" | "down") => void
   fields: CustomFieldDef[]
@@ -44,6 +46,7 @@ function ColumnRow({
   total,
   canRemove,
   onRename,
+  onSetWipLimit,
   onRemove,
   onMove
 }: {
@@ -52,17 +55,31 @@ function ColumnRow({
   total: number
   canRemove: boolean
   onRename: (label: string) => void
+  onSetWipLimit: (limit: number | undefined) => void
   onRemove: () => void
   onMove: (direction: "up" | "down") => void
 }) {
   const [editing, setEditing] = useState(false)
   const [label, setLabel] = useState(column.label)
+  const [limitInput, setLimitInput] = useState(column.wipLimit?.toString() ?? "")
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   function commit() {
     const trimmed = label.trim()
     if (trimmed && trimmed !== column.label) onRename(trimmed)
     else setLabel(column.label)
     setEditing(false)
+  }
+
+  function commitLimit() {
+    const trimmed = limitInput.trim()
+    if (!trimmed) {
+      onSetWipLimit(undefined)
+      return
+    }
+    const n = Math.floor(Number(trimmed))
+    if (Number.isFinite(n) && n > 0) onSetWipLimit(n)
+    else setLimitInput(column.wipLimit?.toString() ?? "")
   }
 
   return (
@@ -105,6 +122,21 @@ function ColumnRow({
         <span className="flex-1 text-sm truncate">{column.label}</span>
       )}
 
+      <input
+        type="number"
+        min={1}
+        value={limitInput}
+        onChange={(e) => setLimitInput(e.target.value)}
+        onBlur={commitLimit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur()
+          if (e.key === "Escape") setLimitInput(column.wipLimit?.toString() ?? "")
+        }}
+        placeholder="∞"
+        title="Limite de WIP (tarefas simultâneas nesta coluna)"
+        className="w-12 shrink-0 bg-muted/40 rounded-md px-1.5 py-1.5 text-xs text-center outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/50"
+      />
+
       <button
         onClick={() => setEditing(true)}
         title="Renomear"
@@ -115,13 +147,22 @@ function ColumnRow({
 
       {canRemove && (
         <button
-          onClick={onRemove}
+          onClick={() => setConfirmOpen(true)}
           title="Remover coluna"
           className="p-1.5 rounded-md text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0"
         >
           <X size={13} />
         </button>
       )}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={`Remover a coluna "${column.label}"?`}
+        description="As tarefas desta coluna serão movidas para a primeira coluna restante."
+        confirmLabel="Remover coluna"
+        onConfirm={onRemove}
+      />
     </div>
   )
 }
@@ -252,6 +293,7 @@ export function RegistryView({
   columns,
   onAddColumn,
   onRenameColumn,
+  onSetWipLimit,
   onRemoveColumn,
   onMoveColumn,
   fields,
@@ -282,6 +324,7 @@ export function RegistryView({
               total={columns.length}
               canRemove={columns.length > 1}
               onRename={(label) => onRenameColumn(column.id, label)}
+              onSetWipLimit={(limit) => onSetWipLimit(column.id, limit)}
               onRemove={() => onRemoveColumn(column.id)}
               onMove={(direction) => onMoveColumn(column.id, direction)}
             />

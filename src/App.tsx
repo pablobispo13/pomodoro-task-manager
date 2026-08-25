@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { useSidebar } from "@/hooks/useSidebar"
 import { usePomodoro, type Mode } from "@/hooks/usePomodoro"
 import { useSettings } from "@/hooks/useSettings"
-import { useTasks } from "@/hooks/useTasks"
+import { useTasks, type Task } from "@/hooks/useTasks"
 import { useMeetingTimer } from "@/hooks/useMeetingTimer"
 import { useColumns } from "@/hooks/useColumns"
 import { useCustomFields } from "@/hooks/useCustomFields"
@@ -15,6 +15,7 @@ import { importAllData } from "@/utils/backup"
 import { TitleBar } from "./components/app/title-bar"
 import { Sidebar, type View } from "./components/app/sidebar"
 import { PhaseAlert } from "./components/app/PhaseAlert"
+import { UndoToast } from "./components/app/UndoToast"
 import { ImportDropOverlay } from "./components/app/ImportDropOverlay"
 import { AppLoader } from "./components/AppLoader"
 import { PomodoroView } from "./components/pomodoro/PomodoroView"
@@ -48,6 +49,7 @@ export default function App() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const [meetingTaskId, setMeetingTaskId] = useState<string | null>(null)
   const [toast, setToast] = useState<{ title: string; body: string } | null>(null)
+  const [undo, setUndo] = useState<{ task: Task; message: string } | null>(null)
   const [isDraggingFile, setIsDraggingFile] = useState(false)
   const dragCounterRef = useRef(0)
 
@@ -86,6 +88,12 @@ export default function App() {
     const timer = setTimeout(() => setToast(null), 5000)
     return () => clearTimeout(timer)
   }, [toast])
+
+  useEffect(() => {
+    if (!undo) return
+    const timer = setTimeout(() => setUndo(null), 6000)
+    return () => clearTimeout(timer)
+  }, [undo])
 
   // Link the active task to focus time: dailyFocus ticks up by 1 once per
   // second, but only while pomodoro is actually in "focus" mode — so every
@@ -244,6 +252,13 @@ export default function App() {
     >
 
       <PhaseAlert message={toast} />
+      <UndoToast
+        message={undo?.message ?? null}
+        onUndo={() => {
+          if (undo) taskStore.restore(undo.task)
+          setUndo(null)
+        }}
+      />
       <ImportDropOverlay active={isDraggingFile} />
 
       {electron && <TitleBar toggleSidebar={toggle} />}
@@ -310,8 +325,10 @@ export default function App() {
                   onAdd={taskStore.add}
                   onUpdate={taskStore.update}
                   onRemove={(id) => {
+                    const removed = taskStore.tasks.find((t) => t.id === id)
                     taskStore.remove(id)
                     if (activeTaskId === id) setActiveTaskId(null)
+                    if (removed) setUndo({ task: removed, message: `Tarefa "${removed.title}" excluída` })
                   }}
                   onToggle={taskStore.toggle}
                   onSetStatus={taskStore.setStatus}
@@ -323,6 +340,7 @@ export default function App() {
                   columns={columnStore.columns}
                   onAddColumn={columnStore.addColumn}
                   onRenameColumn={columnStore.renameColumn}
+                  onSetWipLimit={columnStore.setWipLimit}
                   onRemoveColumn={removeColumn}
                   onReorderColumns={columnStore.reorderColumns}
                   fields={fieldStore.fields}
@@ -345,6 +363,7 @@ export default function App() {
                   columns={columnStore.columns}
                   onAddColumn={columnStore.addColumn}
                   onRenameColumn={columnStore.renameColumn}
+                  onSetWipLimit={columnStore.setWipLimit}
                   onRemoveColumn={removeColumn}
                   onMoveColumn={columnStore.moveColumn}
                   fields={fieldStore.fields}

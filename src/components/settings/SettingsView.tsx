@@ -8,6 +8,7 @@ import { requestNotificationPermission } from "@/utils/notify"
 import { exportAllData, importAllData } from "@/utils/backup"
 import { Moon, Sun, Monitor, Timer, Palette, Check, Power, Bell, Download, Upload } from "lucide-react"
 import { cn } from "@/lib/utils"
+import logo from "@/assets/logo.svg"
 
 type Props = {
   settings: PomodoroSettings
@@ -383,6 +384,12 @@ export function SettingsView({ settings, onUpdate, onReset }: Props) {
           </button>
         </div>
       )}
+
+      {/* ── Sobre ─────────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-center gap-2 pb-2 text-muted-foreground">
+        <img src={logo} alt="" className="h-4 w-4 shrink-0 opacity-80" />
+        <span className="text-xs">Pomodoro Task Manager · versão {__APP_VERSION__}</span>
+      </div>
 
     </div>
   )

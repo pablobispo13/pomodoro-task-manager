@@ -3,6 +3,9 @@ import { useCallback, useState } from "react"
 export type Column = {
   id: string
   label: string
+  // Soft WIP limit — the board flags the column when it holds more tasks
+  // than this, but never blocks a drop. undefined/absent means unlimited.
+  wipLimit?: number
 }
 
 export const STORAGE_KEY = "kanban-columns"
@@ -53,6 +56,14 @@ export function useColumns() {
     })
   }, [])
 
+  const setWipLimit = useCallback((id: string, wipLimit: number | undefined) => {
+    setColumns((prev) => {
+      const next = prev.map((c) => (c.id === id ? { ...c, wipLimit } : c))
+      persist(next)
+      return next
+    })
+  }, [])
+
   // Tasks left in the removed column are the caller's responsibility to
   // reassign first (useColumns doesn't know about useTasks).
   const removeColumn = useCallback((id: string) => {
@@ -91,5 +102,5 @@ export function useColumns() {
     })
   }, [])
 
-  return { columns, addColumn, renameColumn, removeColumn, moveColumn, reorderColumns }
+  return { columns, addColumn, renameColumn, setWipLimit, removeColumn, moveColumn, reorderColumns }
 }

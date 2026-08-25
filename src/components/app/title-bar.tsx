@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Minus, Square, Copy, X } from "lucide-react"
 import { SidebarToggle } from "./SidebarToggle"
+import logo from "@/assets/logo.svg"
 
 type Props = {
     toggleSidebar: () => void
@@ -20,7 +21,8 @@ export function TitleBar({ toggleSidebar }: Props) {
         <div className="drag titlebar-surface flex h-10 items-center justify-between px-3 select-none">
             <SidebarToggle toggleSidebar={toggleSidebar} />
 
-            <div className="font-medium text-sm">
+            <div className="flex items-center gap-1.5 font-medium text-sm">
+                <img src={logo} alt="" className="h-4 w-4 shrink-0" />
                 Pomodoro Manager
             </div>
 

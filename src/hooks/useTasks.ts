@@ -110,6 +110,17 @@ export function useTasks() {
     })
   }, [])
 
+  // Re-inserts a task exactly as it was — used to undo a `remove`. Guards
+  // against double-inserting if undo is somehow triggered twice for the same task.
+  const restore = useCallback((task: Task) => {
+    setTasks((prev) => {
+      if (prev.some((t) => t.id === task.id)) return prev
+      const next = [...prev, task]
+      persist(next)
+      return next
+    })
+  }, [])
+
   const setStatus = useCallback((id: string, status: TaskStatus) => {
     setTasks((prev) => {
       const next = prev.map((t) => {
@@ -238,6 +249,7 @@ export function useTasks() {
     add,
     update,
     remove,
+    restore,
     toggle,
     setStatus,
     reorderColumn,

@@ -1,7 +1,7 @@
 {
   "name": "pomodoro-task-manager-app",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.6.0",
   "description": "Aplicativo de pomodoro e gerenciamento de tarefas com Kanban, para Electron e web.",
   "author": "Pablo Bispo",
   "type": "module",
@@ -20,7 +20,7 @@
     "appId": "com.pablobispo.pomodorotaskmanager",
     "productName": "Pomodoro Task Manager",
     "directories": {
-      "output": "release"
+      "output": "C:/Builds/pomodoro-task-manager"
     },
     "files": [
       "dist/**/*",
@@ -28,7 +28,8 @@
       "package.json"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "public/logo.png"
     },
     "nsis": {
       "oneClick": false,

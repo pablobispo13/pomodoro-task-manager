@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Check,
@@ -37,6 +37,15 @@ import {
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { cn } from "@/lib/utils"
 import { formatTime } from "@/utils/formatTime"
 import type { Task, TaskPriority, TaskStatus } from "@/hooks/useTasks"
@@ -64,6 +73,7 @@ type Props = {
   columns: Column[]
   onAddColumn: (label: string) => void
   onRenameColumn: (id: string, label: string) => void
+  onSetWipLimit: (id: string, limit: number | undefined) => void
   onRemoveColumn: (id: string) => void
   onReorderColumns: (orderedIds: string[]) => void
   fields: CustomFieldDef[]
@@ -112,9 +122,12 @@ type TaskFormProps = {
   onSubmit: (values: FormValues) => void
   onCancel: () => void
   submitLabel: string
+  // Set when the form is already inside a Dialog (which supplies its own
+  // card chrome) — drops the outer border/background so it doesn't nest.
+  bare?: boolean
 }
 
-function TaskForm({ initial, onSubmit, onCancel, submitLabel }: TaskFormProps) {
+function TaskForm({ initial, onSubmit, onCancel, submitLabel, bare }: TaskFormProps) {
   const [values, setValues] = useState<FormValues>(
     initial ?? { title: "", description: "", priority: "medium", estimatedPomodoros: 1 }
   )
@@ -132,7 +145,7 @@ function TaskForm({ initial, onSubmit, onCancel, submitLabel }: TaskFormProps) {
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.15 }}
       onSubmit={handleSubmit}
-      className="bg-card border border-border rounded-lg p-4 flex flex-col gap-3"
+      className={cn("flex flex-col gap-3", !bare && "bg-card border border-border rounded-lg p-4")}
     >
       <input
         autoFocus
@@ -516,50 +529,51 @@ function SortableCard({ task, handlers }: { task: Task; handlers: CardHandlers }
   )
 }
 
-function AddColumnButton({ onAdd }: { onAdd: (label: string) => void }) {
-  const [adding, setAdding] = useState(false)
+function AddColumnDialog({ onAdd }: { onAdd: (label: string) => void }) {
+  const [open, setOpen] = useState(false)
   const [value, setValue] = useState("")
 
-  function submit() {
-    const label = value.trim()
-    if (label) onAdd(label)
+  function submit(e: React.FormEvent) {
+    e.preventDefault()
+    const trimmed = value.trim()
+    if (!trimmed) return
+    onAdd(trimmed)
     setValue("")
-    setAdding(false)
+    setOpen(false)
   }
 
-  if (!adding) {
-    return (
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
       <button
-        onClick={() => setAdding(true)}
+        onClick={() => setOpen(true)}
         className="w-72 shrink-0 h-fit flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground border border-dashed border-border rounded-xl p-3 hover:bg-muted/30 transition-colors"
       >
         <Plus size={14} /> Nova coluna
       </button>
-    )
-  }
-
-  return (
-    <div className="w-72 shrink-0 bg-muted/30 rounded-xl p-3 flex flex-col gap-2 h-fit">
-      <input
-        autoFocus
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") submit()
-          if (e.key === "Escape") setAdding(false)
-        }}
-        placeholder="Nome da coluna"
-        className="bg-background rounded-md px-2 py-1.5 text-sm outline-none focus:ring-1 focus:ring-primary"
-      />
-      <div className="flex gap-2 justify-end">
-        <Button type="button" variant="ghost" size="sm" onClick={() => setAdding(false)}>
-          Cancelar
-        </Button>
-        <Button size="sm" onClick={submit} disabled={!value.trim()}>
-          Adicionar
-        </Button>
-      </div>
-    </div>
+      <DialogContent>
+        <form onSubmit={submit}>
+          <DialogHeader>
+            <DialogTitle>Nova coluna</DialogTitle>
+            <DialogDescription>Aparece no fim do quadro Kanban.</DialogDescription>
+          </DialogHeader>
+          <input
+            autoFocus
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="Nome da coluna"
+            className="w-full bg-muted/40 rounded-md px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+          />
+          <DialogFooter>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
+              Cancelar
+            </Button>
+            <Button type="submit" size="sm" disabled={!value.trim()}>
+              Adicionar
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -569,6 +583,7 @@ function KanbanColumn({
   tasks,
   getHandlers,
   onRename,
+  onSetWipLimit,
   onRemove,
   canRemove
 }: {
@@ -577,6 +592,7 @@ function KanbanColumn({
   tasks: Task[]
   getHandlers: (task: Task) => CardHandlers
   onRename: (label: string) => void
+  onSetWipLimit: (limit: number | undefined) => void
   onRemove: () => void
   canRemove: boolean
 }) {
@@ -591,7 +607,23 @@ function KanbanColumn({
   } = useSortable({ id: column.id })
   const [editing, setEditing] = useState(false)
   const [label, setLabel] = useState(column.label)
+  const [editingLimit, setEditingLimit] = useState(false)
+  const [limitValue, setLimitValue] = useState(column.wipLimit?.toString() ?? "")
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const columnTasks = taskIds.map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => t !== undefined)
+  const overLimit = column.wipLimit !== undefined && columnTasks.length > column.wipLimit
+
+  function commitLimit() {
+    const trimmed = limitValue.trim()
+    if (!trimmed) {
+      onSetWipLimit(undefined)
+    } else {
+      const n = Math.floor(Number(trimmed))
+      if (Number.isFinite(n) && n > 0) onSetWipLimit(n)
+      else setLimitValue(column.wipLimit?.toString() ?? "")
+    }
+    setEditingLimit(false)
+  }
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -646,12 +678,43 @@ function KanbanColumn({
           </h3>
         )}
         <div className="flex items-center gap-1 shrink-0">
-          <span className="text-[10px] text-muted-foreground bg-muted rounded-full px-1.5 py-0.5">
-            {columnTasks.length}
-          </span>
+          {editingLimit ? (
+            <input
+              autoFocus
+              type="number"
+              min={1}
+              value={limitValue}
+              onChange={(e) => setLimitValue(e.target.value)}
+              onBlur={commitLimit}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitLimit()
+                if (e.key === "Escape") {
+                  setLimitValue(column.wipLimit?.toString() ?? "")
+                  setEditingLimit(false)
+                }
+              }}
+              placeholder="∞"
+              title="Limite de WIP (tarefas simultâneas nesta coluna)"
+              className="w-9 bg-background rounded-full px-1 py-0.5 text-[10px] text-center outline-none focus:ring-1 focus:ring-primary"
+            />
+          ) : (
+            <button
+              onClick={() => setEditingLimit(true)}
+              title="Clique para definir um limite de WIP"
+              className={cn(
+                "text-[10px] rounded-full px-1.5 py-0.5 transition-colors",
+                overLimit
+                  ? "bg-destructive/15 text-destructive font-semibold"
+                  : "text-muted-foreground bg-muted hover:bg-muted/80"
+              )}
+            >
+              {columnTasks.length}
+              {column.wipLimit ? `/${column.wipLimit}` : ""}
+            </button>
+          )}
           {canRemove && (
             <button
-              onClick={onRemove}
+              onClick={() => setConfirmOpen(true)}
               title="Remover coluna"
               className="text-muted-foreground/40 hover:text-destructive transition-colors"
             >
@@ -660,6 +723,19 @@ function KanbanColumn({
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={`Remover a coluna "${column.label}"?`}
+        description={
+          columnTasks.length > 0
+            ? `${columnTasks.length} tarefa${columnTasks.length !== 1 ? "s" : ""} desta coluna ${columnTasks.length !== 1 ? "serão movidas" : "será movida"} para a primeira coluna restante.`
+            : undefined
+        }
+        confirmLabel="Remover coluna"
+        onConfirm={onRemove}
+      />
       <div ref={setDroppableRef} className="flex flex-col gap-2 overflow-y-auto flex-1 pr-0.5">
         <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
           {columnTasks.map((task) => (
@@ -691,6 +767,7 @@ function KanbanBoard({
   onReorderColumn,
   onAddColumn,
   onRenameColumn,
+  onSetWipLimit,
   onRemoveColumn,
   onReorderColumns,
   getHandlers
@@ -701,6 +778,7 @@ function KanbanBoard({
   onReorderColumn: (status: TaskStatus, orderedIds: string[]) => void
   onAddColumn: (label: string) => void
   onRenameColumn: (id: string, label: string) => void
+  onSetWipLimit: (id: string, limit: number | undefined) => void
   onRemoveColumn: (id: string) => void
   onReorderColumns: (orderedIds: string[]) => void
   getHandlers: (task: Task) => CardHandlers
@@ -805,11 +883,12 @@ function KanbanBoard({
               tasks={tasks}
               getHandlers={getHandlers}
               onRename={(label) => onRenameColumn(column.id, label)}
+              onSetWipLimit={(limit) => onSetWipLimit(column.id, limit)}
               onRemove={() => onRemoveColumn(column.id)}
               canRemove={columns.length > 1}
             />
           ))}
-          <AddColumnButton onAdd={onAddColumn} />
+          <AddColumnDialog onAdd={onAddColumn} />
         </div>
       </SortableContext>
 
@@ -849,6 +928,7 @@ export function TasksView({
   columns,
   onAddColumn,
   onRenameColumn,
+  onSetWipLimit,
   onRemoveColumn,
   onReorderColumns,
   fields,
@@ -858,6 +938,25 @@ export function TasksView({
   const [filter, setFilter] = useState<Filter>("all")
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+
+  // Keyboard shortcut: "N" opens the new-task dialog, unless the user is
+  // typing somewhere (an input/textarea/contenteditable) or it's already open.
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key.toLowerCase() !== "n" || e.ctrlKey || e.metaKey || e.altKey) return
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return
+      // Also bail if any dialog is open (e.g. a delete-confirmation) — focus may
+      // be on a button inside it rather than an input, so the check above alone
+      // wouldn't catch it.
+      if (showAddForm || document.querySelector('[role="dialog"]')) return
+      e.preventDefault()
+      setShowAddForm(true)
+      setEditingId(null)
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [showAddForm])
 
   const active = tasks.filter((t) => t.status !== "done")
   const completed = tasks.filter((t) => t.status === "done")
@@ -951,30 +1050,33 @@ export function TasksView({
 
           <Button
             size="sm"
+            title="Atalho: N"
             onClick={() => {
-              setShowAddForm((v) => !v)
+              setShowAddForm(true)
               if (editingId) setEditingId(null)
             }}
             className="gap-1.5"
           >
-            {showAddForm ? <X size={14} /> : <Plus size={14} />}
-            {showAddForm ? "Cancelar" : "Nova Tarefa"}
+            <Plus size={14} />
+            Nova Tarefa
           </Button>
         </div>
       </div>
 
       {/* Add form */}
-      <AnimatePresence>
-        {showAddForm && (
-          <div className={cn("mb-4", viewMode === "kanban" && "max-w-2xl")}>
-            <TaskForm
-              onSubmit={handleAdd}
-              onCancel={() => setShowAddForm(false)}
-              submitLabel="Adicionar"
-            />
-          </div>
-        )}
-      </AnimatePresence>
+      <Dialog open={showAddForm} onOpenChange={setShowAddForm}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Nova tarefa</DialogTitle>
+          </DialogHeader>
+          <TaskForm
+            bare
+            onSubmit={handleAdd}
+            onCancel={() => setShowAddForm(false)}
+            submitLabel="Adicionar"
+          />
+        </DialogContent>
+      </Dialog>
 
       {viewMode === "kanban" ? (
         <KanbanBoard
@@ -984,6 +1086,7 @@ export function TasksView({
           onReorderColumn={onReorderColumn}
           onAddColumn={onAddColumn}
           onRenameColumn={onRenameColumn}
+          onSetWipLimit={onSetWipLimit}
           onRemoveColumn={onRemoveColumn}
           onReorderColumns={onReorderColumns}
           getHandlers={getHandlers}

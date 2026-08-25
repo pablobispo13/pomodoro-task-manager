@@ -27,6 +27,9 @@ function createWindow() {
     show: false,
     backgroundColor: "#0f0f0f",
     hasShadow: true,
+    // "public/" is copied verbatim into "dist/" by `vite build`, so the same
+    // file lives at "dist/logo.png" once packaged.
+    icon: path.join(__dirname, app.isPackaged ? "../../dist/logo.png" : "../../public/logo.png"),
     titleBarStyle: "hidden",
     trafficLightPosition: { x: 15, y: 15 },
     webPreferences: {
