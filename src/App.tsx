@@ -95,6 +95,34 @@ export default function App() {
     return () => clearTimeout(timer)
   }, [undo])
 
+  // Keeps the tray tooltip/menu (main process) showing the current phase and
+  // time left — pushed on every tick, mirroring how the interval in
+  // usePomodoro already updates `time` once per second while running.
+  useEffect(() => {
+    if (!isElectron()) return
+    window.windowControls.sendTimerStatus({
+      mode: pomodoro.mode,
+      time: pomodoro.time,
+      running: pomodoro.running
+    })
+  }, [pomodoro.mode, pomodoro.time, pomodoro.running])
+
+  // "Pausar/Retomar pomodoro" in the tray context menu sends this instead of
+  // owning any timer state itself — pomodoroRef sidesteps the stale-closure
+  // issue since this listener is registered once on mount.
+  const pomodoroRef = useRef(pomodoro)
+  useEffect(() => {
+    pomodoroRef.current = pomodoro
+  })
+  useEffect(() => {
+    if (!isElectron()) return
+    window.windowControls.onTrayToggleTimer(() => {
+      const p = pomodoroRef.current
+      if (p.running) p.pause()
+      else p.start()
+    })
+  }, [])
+
   // Link the active task to focus time: dailyFocus ticks up by 1 once per
   // second, but only while pomodoro is actually in "focus" mode — so every
   // change here means one more second of real focus happened.

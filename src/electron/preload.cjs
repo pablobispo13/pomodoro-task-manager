@@ -9,7 +9,9 @@ contextBridge.exposeInMainWorld("windowControls", {
   onMaximizeChange: (callback) =>
     ipcRenderer.on("window-maximized", (_, value) => callback(value)),
   getAutoLaunch: () => ipcRenderer.invoke("get-auto-launch"),
-  setAutoLaunch: (enabled) => ipcRenderer.send("set-auto-launch", enabled)
+  setAutoLaunch: (enabled) => ipcRenderer.send("set-auto-launch", enabled),
+  sendTimerStatus: (status) => ipcRenderer.send("timer-status", status),
+  onTrayToggleTimer: (callback) => ipcRenderer.on("tray-toggle-timer", () => callback())
 })
 
 contextBridge.exposeInMainWorld("notifications", {
