@@ -810,6 +810,18 @@ function KanbanBoard({
     setDragMap(buildColumnMap(tasks, columns))
   }
 
+  // `over.id` can be: a droppable "column-X" (dropping into an empty column,
+  // or generally anywhere in the column that isn't tightly over a card — the
+  // column's own sortable rect, used for column-header reordering, spans the
+  // whole column and out-competes the narrower per-card droppable), a raw
+  // column id (dropping over that same whole-column sortable rect), or a
+  // task id (dropping on/near another card). Normalize all three to a column.
+  function resolveTargetColumn(overId: string): string | undefined {
+    if (overId.startsWith("column-")) return overId.slice("column-".length)
+    if (isColumnId(overId)) return overId
+    return findColumnOf(overId)
+  }
+
   function handleDragOver(event: DragOverEvent) {
     const { active, over } = event
     if (!over) return
@@ -818,14 +830,15 @@ function KanbanBoard({
     const activeId = String(active.id)
     const overId = String(over.id)
     const sourceCol = findColumnOf(activeId)
-    const targetCol = overId.startsWith("column-") ? overId.slice("column-".length) : findColumnOf(overId)
+    const targetCol = resolveTargetColumn(overId)
     if (!sourceCol || !targetCol || sourceCol === targetCol) return
 
     setDragMap((prev) => {
       const map = prev ?? buildColumnMap(tasks, columns)
       const sourceIds = map[sourceCol].filter((id) => id !== activeId)
       const destIds = [...map[targetCol]]
-      const insertAt = overId.startsWith("column-") ? destIds.length : destIds.indexOf(overId)
+      const insertAt =
+        overId.startsWith("column-") || isColumnId(overId) ? destIds.length : destIds.indexOf(overId)
       destIds.splice(insertAt === -1 ? destIds.length : insertAt, 0, activeId)
       return { ...map, [sourceCol]: sourceIds, [targetCol]: destIds }
     })
@@ -853,8 +866,9 @@ function KanbanBoard({
     if (!finalCol || !ids) return
 
     const overId = String(over.id)
+    const newIndex =
+      overId.startsWith("column-") || isColumnId(overId) ? ids.length - 1 : ids.indexOf(overId)
     const oldIndex = ids.indexOf(activeId)
-    const newIndex = overId.startsWith("column-") ? ids.length - 1 : ids.indexOf(overId)
     const reordered = oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex ? arrayMove(ids, oldIndex, newIndex) : ids
 
     const original = tasks.find((t) => t.id === activeId)
